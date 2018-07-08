@@ -1,6 +1,6 @@
 [package]
 name = "iota-pow-box"
-version = "0.0.1"
+version = "0.0.2"
 authors = ["Nathan Jaremko <nathan@jaremko.ca>"]
 description = "A remote PoW server written"
 license = "MIT"

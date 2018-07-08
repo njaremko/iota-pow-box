@@ -85,7 +85,7 @@ fn pow(
     Ok(result)
 }
 
-fn main() {
+fn main() -> Result<(), Error> {
     let (pow_tx, pow_rx): (Sender<String>, Receiver<String>) = mpsc::channel();
 
     thread::spawn(move || {
@@ -94,7 +94,10 @@ fn main() {
             let request: PowRequest = serde_json::from_str(&work).unwrap_or_default();
             let id = request.id.clone();
             let result = process_request(&mut pearl_diver, request);
-            RESULT_MAP.insert(id, result);
+            match result {
+                Ok(res) => RESULT_MAP.insert(id, res),
+                Err(e) => RESULT_MAP.insert(id.clone(), AttachToTangleResponse::new(0, Some(id), Some(e.to_string()), None, None))
+            };
         }
     });
 
@@ -104,9 +107,10 @@ fn main() {
         })
         .mount("/", routes![index, pow, check_status])
         .launch();
+    Ok(())
 }
 
-fn process_request(pearl_diver: &mut PearlDiver, request: PowRequest) -> AttachToTangleResponse {
+fn process_request(pearl_diver: &mut PearlDiver, request: PowRequest) -> Result<AttachToTangleResponse, Error> {
     let trytes = request.trytes;
     let trunk_transaction = request.trunk_transaction;
     let branch_transaction = request.branch_transaction;
@@ -115,12 +119,7 @@ fn process_request(pearl_diver: &mut PearlDiver, request: PowRequest) -> AttachT
     let mut result_trytes: Vec<String> = Vec::with_capacity(trytes.len());
     let mut previous_transaction: Option<String> = None;
     for i in 0..trytes.len() {
-        let mut tx: Transaction;
-        match trytes[i].parse() {
-            Ok(t) => tx = t,
-            Err(_) => continue,
-        }
-
+        let mut tx: Transaction = trytes[i].parse()?;
         let new_trunk_tx = if let Some(previous_transaction) = &previous_transaction {
             previous_transaction.to_string()
         } else {
@@ -144,18 +143,10 @@ fn process_request(pearl_diver: &mut PearlDiver, request: PowRequest) -> AttachT
         tx.set_attachment_timestamp_upper_bound(*MAX_TIMESTAMP_VALUE);
         let mut tx_trits = converter::trits_from_string(&tx.to_trytes());
 
-        if let Err(_) = pearl_diver.search(&mut tx_trits, min_weight_magnitude) {
-            continue;
-        }
-        match converter::trits_to_string(&tx_trits) {
-            Ok(tx_trit_str) => result_trytes.push(tx_trit_str),
-            Err(_) => continue,
-        }
-        match result_trytes[i].parse::<Transaction>() {
-            Ok(res) => previous_transaction = res.hash(),
-            Err(_) => continue,
-        }
+        pearl_diver.search(&mut tx_trits, min_weight_magnitude)?;
+        result_trytes.push(converter::trits_to_string(&tx_trits)?);
+        previous_transaction = result_trytes[i].parse::<Transaction>()?.hash();
     }
     result_trytes.reverse();
-    AttachToTangleResponse::new(0, None, None, None, Some(result_trytes))
+    Ok(AttachToTangleResponse::new(0, None, None, None, Some(result_trytes)))
 }
